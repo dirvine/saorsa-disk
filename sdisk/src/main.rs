@@ -44,18 +44,27 @@ enum Commands {
         /// Number of entries to show
         #[arg(short, long, default_value_t = 20)]
         count: usize,
+        /// Optional paths to analyze (defaults to CWD if none and no --path)
+        #[arg(value_name = "PATH")]
+        paths: Vec<PathBuf>,
     },
     /// List stale files/dirs older than --stale-days
     Stale {
         /// Show at most N items
         #[arg(short, long, default_value_t = 100)]
         limit: usize,
+        /// Optional paths to analyze (defaults to CWD if none and no --path)
+        #[arg(value_name = "PATH")]
+        paths: Vec<PathBuf>,
     },
     /// Remove stale items after confirmation
     Clean {
         /// Show at most N candidates
         #[arg(short, long, default_value_t = 100)]
         limit: usize,
+        /// Optional paths to analyze (defaults to CWD if none and no --path)
+        #[arg(value_name = "PATH")]
+        paths: Vec<PathBuf>,
     },
 }
 
@@ -63,17 +72,21 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command.unwrap_or(Commands::Info) {
         Commands::Info => cmd_info(),
-        Commands::Top { count } => {
-            cmd_top(cli.path, count, !cli.non_interactive, cli.yes, cli.dry_run)
+        Commands::Top { count, paths } => {
+            let roots = collect_roots(cli.path, paths)?;
+            cmd_top(roots, count, !cli.non_interactive, cli.yes, cli.dry_run)
         }
-        Commands::Stale { limit } | Commands::Clean { limit } => cmd_stale(
-            cli.path,
-            cli.stale_days,
-            limit,
-            !cli.non_interactive,
-            !cli.yes,
-            cli.dry_run,
-        ),
+        Commands::Stale { limit, paths } | Commands::Clean { limit, paths } => {
+            let roots = collect_roots(cli.path, paths)?;
+            cmd_stale(
+                roots,
+                cli.stale_days,
+                limit,
+                !cli.non_interactive,
+                !cli.yes,
+                cli.dry_run,
+            )
+        }
     }
 }
 
@@ -93,26 +106,45 @@ fn cmd_info() -> Result<()> {
     Ok(())
 }
 
+fn collect_roots(opt_root: Option<PathBuf>, extra: Vec<PathBuf>) -> Result<Vec<PathBuf>> {
+    let mut roots: Vec<PathBuf> = Vec::new();
+    if let Some(r) = opt_root {
+        roots.push(r);
+    }
+    for p in extra {
+        if !roots.contains(&p) {
+            roots.push(p);
+        }
+    }
+    if roots.is_empty() {
+        roots.push(std::env::current_dir()?);
+    }
+    Ok(roots)
+}
+
 fn cmd_top(
-    root: Option<PathBuf>,
+    roots: Vec<PathBuf>,
     count: usize,
     interactive: bool,
     yes: bool,
     dry_run: bool,
 ) -> Result<()> {
-    let root = root.unwrap_or(std::env::current_dir()?);
-    println!("{} {}", style("Scanning").bold(), root.display());
+    for root in &roots {
+        println!("{} {}", style("Scanning").bold(), root.display());
+    }
     let pb = spinner();
     let mut entries: Vec<(PathBuf, u64)> = Vec::new();
-    for entry in WalkDir::new(&root)
-        .max_depth(3)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        let path = entry.path();
-        if path.is_file() {
-            if let Ok(meta) = path.metadata() {
-                entries.push((path.to_path_buf(), meta.len()));
+    for root in &roots {
+        for entry in WalkDir::new(root)
+            .max_depth(3)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            let path = entry.path();
+            if path.is_file() {
+                if let Ok(meta) = path.metadata() {
+                    entries.push((path.to_path_buf(), meta.len()));
+                }
             }
         }
     }
@@ -167,7 +199,7 @@ fn cmd_top(
 }
 
 fn cmd_stale(
-    root: Option<PathBuf>,
+    roots: Vec<PathBuf>,
     days: u64,
     limit: usize,
     interactive: bool,
@@ -176,33 +208,35 @@ fn cmd_stale(
 ) -> Result<()> {
     use std::time::{Duration, SystemTime};
 
-    let root = root.unwrap_or(std::env::current_dir()?);
     let cutoff = SystemTime::now() - Duration::from_secs(days * 24 * 60 * 60);
-    println!(
-        "{} {} (older than {} days)",
-        style("Finding stale items in").bold(),
-        root.display(),
-        days
-    );
+    for root in &roots {
+        println!(
+            "{} {} (older than {} days)",
+            style("Finding stale items in").bold(),
+            root.display(),
+            days
+        );
+    }
     let pb = spinner();
     let mut items: Vec<(PathBuf, u64, SystemTime)> = Vec::new();
-
-    for entry in WalkDir::new(&root).into_iter().filter_map(|e| e.ok()) {
-        let path = entry.path().to_path_buf();
-        if let Ok(meta) = path.symlink_metadata() {
-            // Prefer last access; fall back to modified
-            let time = meta
-                .accessed()
-                .ok()
-                .or_else(|| meta.modified().ok())
-                .unwrap_or(SystemTime::UNIX_EPOCH);
-            if time <= cutoff {
-                let size = if meta.is_file() {
-                    meta.len()
-                } else {
-                    dir_size(&path).unwrap_or(0)
-                };
-                items.push((path, size, time));
+    for root in &roots {
+        for entry in WalkDir::new(root).into_iter().filter_map(|e| e.ok()) {
+            let path = entry.path().to_path_buf();
+            if let Ok(meta) = path.symlink_metadata() {
+                // Prefer last access; fall back to modified
+                let time = meta
+                    .accessed()
+                    .ok()
+                    .or_else(|| meta.modified().ok())
+                    .unwrap_or(SystemTime::UNIX_EPOCH);
+                if time <= cutoff {
+                    let size = if meta.is_file() {
+                        meta.len()
+                    } else {
+                        dir_size(&path).unwrap_or(0)
+                    };
+                    items.push((path, size, time));
+                }
             }
         }
     }
