@@ -21,6 +21,16 @@ struct Cli {
     #[arg(global = true, long, default_value_t = 90)]
     stale_days: u64,
 
+    /// Run non-interactively (no selection UI)
+    #[arg(global = true, long)]
+    non_interactive: bool,
+    /// Assume yes for confirmations (non-interactive)
+    #[arg(global = true, long)]
+    yes: bool,
+    /// Dry run: show what would be removed
+    #[arg(global = true, long)]
+    dry_run: bool,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -34,45 +44,18 @@ enum Commands {
         /// Number of entries to show
         #[arg(short, long, default_value_t = 20)]
         count: usize,
-        /// Interactive selection to delete chosen files
-        #[arg(short = 'i', long)]
-        interactive: bool,
-        /// Actually delete without prompting (use with --interactive)
-        #[arg(long)]
-        yes: bool,
-        /// Dry run: show what would be removed
-        #[arg(long)]
-        dry_run: bool,
     },
     /// List stale files/dirs older than --stale-days
     Stale {
         /// Show at most N items
         #[arg(short, long, default_value_t = 100)]
         limit: usize,
-        /// Interactive selection to delete chosen items
-        #[arg(short = 'i', long)]
-        interactive: bool,
-        /// Actually delete without prompting (use with --interactive)
-        #[arg(long)]
-        yes: bool,
-        /// Dry run: show what would be removed
-        #[arg(long)]
-        dry_run: bool,
     },
     /// Remove stale items after confirmation
     Clean {
-        /// Actually delete without prompting (DANGEROUS)
-        #[arg(long)]
-        yes: bool,
-        /// Dry run: show what would be removed
-        #[arg(long)]
-        dry_run: bool,
         /// Show at most N candidates
         #[arg(short, long, default_value_t = 100)]
         limit: usize,
-        /// Interactive selection to choose which to delete
-        #[arg(short = 'i', long)]
-        interactive: bool,
     },
 }
 
@@ -80,24 +63,17 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command.unwrap_or(Commands::Info) {
         Commands::Info => cmd_info(),
-        Commands::Top {
-            count,
-            interactive,
-            yes,
-            dry_run,
-        } => cmd_top(cli.path, count, interactive, yes, dry_run),
-        Commands::Stale {
+        Commands::Top { count } => {
+            cmd_top(cli.path, count, !cli.non_interactive, cli.yes, cli.dry_run)
+        }
+        Commands::Stale { limit } | Commands::Clean { limit } => cmd_stale(
+            cli.path,
+            cli.stale_days,
             limit,
-            interactive,
-            yes,
-            dry_run,
-        } => cmd_stale(cli.path, cli.stale_days, limit, interactive, !yes, dry_run),
-        Commands::Clean {
-            yes,
-            dry_run,
-            limit,
-            interactive,
-        } => cmd_stale(cli.path, cli.stale_days, limit, interactive, !yes, dry_run),
+            !cli.non_interactive,
+            !cli.yes,
+            cli.dry_run,
+        ),
     }
 }
 

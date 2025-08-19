@@ -14,19 +14,24 @@ cargo install sdisk
 # Overview of disks
 sdisk info
 
-# Show largest files under a path
+# Show largest files under a path (interactive by default)
 sdisk top -p ~/ -c 20
 
-# Find stale files older than 120 days
+# Find stale files older than 120 days (interactive)
 sdisk stale -p ~/Projects --stale-days 120
 
-# Clean candidates (prompt)
+# Clean candidates (interactive)
 sdisk clean -p ~/Downloads --stale-days 90 --limit 50
 
-# Clean without prompt (DANGEROUS)
-sdisk clean -p ~/Downloads --stale-days 90 --limit 50 --yes
+# Non-interactive modes
+#   --non-interactive: no selection UI
+#   --yes: skip confirmation in non-interactive mode
+#   --dry-run: preview deletions
 
-# Dry run
+# Example: non-interactive, auto-confirm
+sdisk clean -p ~/Downloads --stale-days 90 --limit 50 --non-interactive --yes
+
+# Example: dry run
 sdisk clean -p ~/Downloads --stale-days 90 --dry-run
 ```
 
